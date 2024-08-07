@@ -2,7 +2,14 @@
 name = "run"
 version = "0.1.0"
 edition = "2021"
+autoexamples = false
 
 [dependencies]
 anyhow = "1.0.86"
+quote = "1.0"
+syn = { version = "1.0", features = ["full", "extra-traits"] }
 tempdir = "0.3.7"
+toml_edit = "0.22.20"
+
+[dev-dependencies]
+indoc = "2.0.5"

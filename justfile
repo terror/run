@@ -16,6 +16,9 @@ fmt-check:
   cargo +nightly fmt --all -- --check
   @echo formatting check done
 
+install:
+  cargo install --path .
+
 run *args:
   cargo run -- {{args}}
 
