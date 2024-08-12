@@ -12,8 +12,6 @@ use {
   toml_edit::{DocumentMut, Item as TomlItem},
 };
 
-type Result<T = (), E = anyhow::Error> = std::result::Result<T, E>;
-
 fn get_cache_dir() -> PathBuf {
   let xdg_dirs =
     xdg::BaseDirectories::new().expect("Failed to initialize XDG directories");
@@ -23,21 +21,23 @@ fn get_cache_dir() -> PathBuf {
     .expect("Failed to create cache directory")
 }
 
-fn extract_external_dependencies(content: &str) -> Result<HashSet<String>> {
+fn extract_external_rust_dependencies(
+  content: &str,
+) -> Result<HashSet<String>> {
   let syntax = syn::parse_file(content)?;
 
   let mut dependencies = HashSet::new();
 
   for item in syntax.items {
     if let Item::Use(item_use) = item {
-      extract_dependency_from_use_tree(&item_use.tree, &mut dependencies);
+      extract_rust_dependency_from_use_tree(&item_use.tree, &mut dependencies);
     }
   }
 
   Ok(dependencies)
 }
 
-fn extract_dependency_from_use_tree(
+fn extract_rust_dependency_from_use_tree(
   tree: &UseTree,
   dependencies: &mut HashSet<String>,
 ) {
@@ -51,16 +51,15 @@ fn extract_dependency_from_use_tree(
     }
     UseTree::Group(use_group) => {
       for tree in &use_group.items {
-        extract_dependency_from_use_tree(tree, dependencies);
+        extract_rust_dependency_from_use_tree(tree, dependencies);
       }
     }
     _ => {}
   }
 }
 
-fn run_rust(filename: &str) -> Result {
+fn handle_rust(filename: &str) -> Result {
   let temp_dir = TempDir::new(env!("CARGO_PKG_NAME"))?;
-  let temp_path = temp_dir.path();
 
   let cache_dir = get_cache_dir();
 
@@ -69,23 +68,23 @@ fn run_rust(filename: &str) -> Result {
 
   Command::new("cargo")
     .args(&["init", "--bin", "--name", env!("CARGO_PKG_NAME")])
-    .current_dir(temp_path)
+    .current_dir(temp_dir.path())
     .stdout(Stdio::null())
     .stderr(Stdio::null())
     .status()
     .context("failed to initialize cargo project")?;
 
-  let src_path = temp_path.join("src").join("main.rs");
+  let src_path = temp_dir.path().join("src").join("main.rs");
 
   fs::copy(filename, &src_path)?;
 
   let content = fs::read_to_string(filename)?;
 
-  let dependencies = extract_external_dependencies(&content)
+  let dependencies = extract_external_rust_dependencies(&content)
     .context("Failed to extract dependencies")?;
 
   if !dependencies.is_empty() {
-    let cargo_toml_path = temp_path.join("Cargo.toml");
+    let cargo_toml_path = temp_dir.path().join("Cargo.toml");
 
     let mut cargo_toml_content = String::new();
 
@@ -113,16 +112,15 @@ fn run_rust(filename: &str) -> Result {
 
   let output = Command::new("cargo")
     .arg("run")
-    .arg("--release")
     .env("CARGO_HOME", cache_dir.join("registry"))
     .env("CARGO_TARGET_DIR", cache_dir.join("target"))
-    .current_dir(temp_path)
+    .current_dir(temp_dir.path())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .output()?;
 
   if !output.status.success() {
-    bail!("failed to build or run rust project");
+    bail!("failed to run rust project");
   }
 
   println!("{}", String::from_utf8_lossy(&output.stdout).trim());
@@ -130,11 +128,11 @@ fn run_rust(filename: &str) -> Result {
   Ok(())
 }
 
-fn run_python(filename: &str) -> Result {
-  let status = Command::new("python").arg(filename).status()?;
+fn handle_python(filename: &str) -> Result {
+  let status = Command::new("python3").arg(filename).status()?;
 
   if !status.success() {
-    bail!("failed to execute python script");
+    bail!("failed to execute python file");
   }
 
   Ok(())
@@ -156,13 +154,15 @@ fn run() -> Result {
     .ok_or(anyhow!("Failed to get file extension"))?;
 
   match extension {
-    "rs" => run_rust(filename)?,
-    "py" => run_python(filename)?,
+    "py" => handle_python(filename)?,
+    "rs" => handle_rust(filename)?,
     _ => bail!("unsupported file type: {}", extension),
   }
 
   Ok(())
 }
+
+type Result<T = (), E = anyhow::Error> = std::result::Result<T, E>;
 
 fn main() {
   if let Err(error) = run() {
@@ -176,7 +176,7 @@ mod tests {
   use {super::*, indoc::indoc};
 
   #[test]
-  fn extract_single_dependency() {
+  fn extract_single_rust_dependency() {
     let content = indoc! {"
       use rand::Rng;
 
@@ -186,13 +186,13 @@ mod tests {
       }
     "};
 
-    let dependencies = extract_external_dependencies(content).unwrap();
+    let dependencies = extract_external_rust_dependencies(content).unwrap();
 
     assert_eq!(dependencies, HashSet::from(["rand".to_string()]));
   }
 
   #[test]
-  fn extract_multiple_dependencies() {
+  fn extract_multiple_rust_dependencies() {
     let content = indoc! {"
       use rand::Rng;
       use serde_json::Value;
@@ -203,7 +203,7 @@ mod tests {
       }
     "};
 
-    let dependencies = extract_external_dependencies(content).unwrap();
+    let dependencies = extract_external_rust_dependencies(content).unwrap();
 
     assert_eq!(
       dependencies,
@@ -216,7 +216,7 @@ mod tests {
   }
 
   #[test]
-  fn ignore_std_dependencies() {
+  fn ignore_std_rust_dependencies() {
     let content = indoc! {"
       use std::collections::HashMap;
       use std::io::Read;
@@ -226,13 +226,13 @@ mod tests {
       }
     "};
 
-    let dependencies = extract_external_dependencies(content).unwrap();
+    let dependencies = extract_external_rust_dependencies(content).unwrap();
 
     assert!(dependencies.is_empty());
   }
 
   #[test]
-  fn nested_use_statements() {
+  fn nested_rust_use_statements() {
     let content = indoc! {"
       use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -244,13 +244,13 @@ mod tests {
       }
     "};
 
-    let dependencies = extract_external_dependencies(content).unwrap();
+    let dependencies = extract_external_rust_dependencies(content).unwrap();
 
     assert_eq!(dependencies, HashSet::from(["tokio".to_string()]));
   }
 
   #[test]
-  fn mixed_dependencies() {
+  fn mixed_rust_dependencies() {
     let content = indoc! {"
       use std::collections::HashMap;
       use rand::Rng;
@@ -262,7 +262,7 @@ mod tests {
       }
     "};
 
-    let dependencies = extract_external_dependencies(content).unwrap();
+    let dependencies = extract_external_rust_dependencies(content).unwrap();
 
     assert_eq!(
       dependencies,
@@ -271,14 +271,14 @@ mod tests {
   }
 
   #[test]
-  fn no_dependencies() {
+  fn no_rust_dependencies() {
     let content = indoc! {"
       fn main() {
         println!(\"Hello, world!\");
       }
     "};
 
-    let dependencies = extract_external_dependencies(content).unwrap();
+    let dependencies = extract_external_rust_dependencies(content).unwrap();
 
     assert!(dependencies.is_empty());
   }
