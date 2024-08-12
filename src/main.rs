@@ -15,8 +15,12 @@ use {
 type Result<T = (), E = anyhow::Error> = std::result::Result<T, E>;
 
 fn get_cache_dir() -> PathBuf {
-  let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
-  PathBuf::from(home).join(".run_cache")
+  let xdg_dirs =
+    xdg::BaseDirectories::new().expect("Failed to initialize XDG directories");
+
+  xdg_dirs
+    .create_cache_directory("run")
+    .expect("Failed to create cache directory")
 }
 
 fn extract_external_dependencies(content: &str) -> Result<HashSet<String>> {

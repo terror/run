@@ -10,6 +10,7 @@ quote = "1.0"
 syn = { version = "1.0", features = ["full", "extra-traits"] }
 tempdir = "0.3.7"
 toml_edit = "0.22.20"
+xdg = "2.5.2"
 
 [dev-dependencies]
 indoc = "2.0.5"
